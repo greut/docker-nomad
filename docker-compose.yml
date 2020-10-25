@@ -2,19 +2,28 @@ version: '2.1'
 
 services:
   nomad:
-    image: multani/nomad
+    image: greut/nomad:0.12.7
     build: .
-    command: agent -dev
     privileged: true
     network_mode: host
     environment:
+      NOMAD_DATA_DIR: /opt/nomad/data
       NOMAD_LOCAL_CONFIG: |
         datacenter = "${REGION:-test}"
         region     = "${DATACENTER:-test-dc1}"
 
-        data_dir = "/nomad/data/"
-
         bind_addr = "0.0.0.0"
+
+        server {
+          enabled = true
+          bootstrap_expect = 1
+        }
+
+        client {
+          enabled = true
+          servers = ["{{ GetPrivateIP }}:4646"]
+        }
+
         advertise {
           http = "{{ GetPrivateIP }}:4646"
           rpc  = "{{ GetPrivateIP }}:4647"
@@ -23,4 +32,8 @@ services:
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
-      - /tmp:/tmp
+      - nomad_data:/opt/nomad/data
+    tmpfs: /tmp
+
+volumes:
+  nomad_data:

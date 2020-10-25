@@ -1,5 +1,5 @@
-#!/usr/bin/dumb-init /bin/sh
-# Script created following Hashicorp's model for Consul: 
+#!/usr/bin/dumb-init /bin/bash
+# Script created following Hashicorp's model for Consul:
 # https://github.com/hashicorp/docker-consul/blob/master/0.X/docker-entrypoint.sh
 # Comments in this file originate from the project above, simply replacing 'Consul' with 'Nomad'.
 set -e
@@ -13,13 +13,13 @@ set -e
 # NOMAD_CONFIG_DIR isn't exposed as a volume but you can compose additional
 # config files in there if you use this image as a base, or use NOMAD_LOCAL_CONFIG
 # below.
-NOMAD_DATA_DIR=${NOMAD_DATA_DIR:-"/nomad/data"}
-NOMAD_CONFIG_DIR=${NOMAD_CONFIG_DIR:-"/etc/nomad"}
+NOMAD_DATA_DIR=${NOMAD_DATA_DIR:-"/opt/nomad/data"}
+NOMAD_CONFIG_DIR=${NOMAD_CONFIG_DIR:-"/etc/nomad.d"}
 
 # You can also set the NOMAD_LOCAL_CONFIG environemnt variable to pass some
-# Nomad configuration JSON without having to bind any volumes.
+# Nomad configuration HCL without having to bind any volumes.
 if [ -n "$NOMAD_LOCAL_CONFIG" ]; then
-    echo "$NOMAD_LOCAL_CONFIG" > "$NOMAD_CONFIG_DIR/local.json"
+    echo "$NOMAD_LOCAL_CONFIG" > "$NOMAD_CONFIG_DIR/nomad.hcl"
 fi
 
 # If the user is trying to run Nomad directly with some arguments, then
@@ -45,17 +45,17 @@ elif nomad --help "$1" 2>&1 | grep -q "nomad $1"; then
 fi
 
 # If we are running Nomad, make sure it executes as the proper user.
-if [ "$1" = 'nomad' -a -z "${NOMAD_DISABLE_PERM_MGMT+x}" ]; then
+if [ "$1" = 'nomad' ] && [ -z "${NOMAD_DISABLE_PERM_MGMT+x}" ]; then
     # If the data or config dirs are bind mounted then chown them.
     # Note: This checks for root ownership as that's the most common case.
-    if [ "$(stat -c %u $NOMAD_DATA_DIR)" != "$(id -u root)" ]; then
-        chown root:root $NOMAD_DATA_DIR
+    if [ "$(stat -c %u "${NOMAD_DATA_DIR}")" != "$(id -u root)" ]; then
+        chown root:root "${NOMAD_DATA_DIR}"
     fi
 
     # If requested, set the capability to bind to privileged ports before
     # we drop to the non-root user. Note that this doesn't work with all
     # storage drivers (it won't work with AUFS).
-    if [ ! -z ${NOMAD+x} ]; then
+    if [ -n "${NOMAD+x}" ]; then
         setcap "cap_net_bind_service=+ep" /bin/nomad
     fi
 

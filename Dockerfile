@@ -1,74 +1,51 @@
-FROM alpine:3.12
+FROM ubuntu:focal
 
-SHELL ["/bin/ash", "-x", "-c", "-o", "pipefail"]
+SHELL ["/bin/bash", "-x", "-c", "-o", "pipefail"]
 
 # Based on https://github.com/djenriquez/nomad
 LABEL maintainer="Jonathan Ballet <jon@multani.info>"
 
-RUN addgroup nomad && \
-    adduser -S -G nomad nomad
-
-# Allow to fetch artifacts from TLS endpoint during the builds and by Nomad after.
-RUN apk --update --no-cache add \
-        ca-certificates \
-  && update-ca-certificates
-
-
-# https://github.com/sgerrand/alpine-pkg-glibc/releases
-ENV GLIBC_VERSION "2.32-r0"
-
-RUN wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub && \
-    wget -q -O glibc.apk https://github.com/sgerrand/alpine-pkg-glibc/releases/download/${GLIBC_VERSION}/glibc-${GLIBC_VERSION}.apk && \
-    apk add --no-cache \
-        glibc.apk && \
-    rm glibc.apk
-
-RUN apk add --no-cache \
-        dumb-init
-
-# Install timezone data so we can run Nomad periodic jobs containing timezone information
-RUN apk add --no-cache \
-        tzdata
-
-# https://github.com/tianon/gosu/releases
-ENV GOSU_VERSION "1.12"
-
-RUN apk --update add --no-cache --virtual .gosu-deps dpkg gnupg && \
-    dpkgArch="$(dpkg --print-architecture | awk -F- '{ print $NF }')" && \
-    wget -q -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch" && \
-    wget -q -O /usr/local/bin/gosu.asc "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch.asc" && \
-    GNUPGHOME="$(mktemp -d)" && \
-    export GNUPGHOME && \
-    gpg --keyserver pgp.mit.edu --keyserver keyserver.pgp.com --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 && \
-    gpg --batch --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu && \
-    rm -rf "$GNUPGHOME" /usr/local/bin/gosu.asc && \
-    chmod +x /usr/local/bin/gosu && \
-    gosu nobody true && \
-    apk del .gosu-deps
-
 # https://releases.hashicorp.com/nomad/
-ENV NOMAD_VERSION 0.12.5
+ENV NOMAD_VERSION=0.12.7 \
+    GOSU_VERSION=1.10-1 \
+    DUMB_INIT_VERSION=1.2.2-1.2
 
-RUN apk --update add --no-cache --virtual .nomad-deps dpkg gnupg \
-  && wget -q -O nomad_${NOMAD_VERSION}_linux_amd64.zip https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_linux_amd64.zip \
-  && wget -q -O nomad_${NOMAD_VERSION}_SHA256SUMS      https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_SHA256SUMS \
-  && wget -q -O nomad_${NOMAD_VERSION}_SHA256SUMS.sig  https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_SHA256SUMS.sig \
-  && GNUPGHOME="$(mktemp -d)" \
-  && export GNUPGHOME \
-  && gpg --keyserver pgp.mit.edu --keyserver keyserver.pgp.com --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 91A6E7F85D05C65630BEF18951852D87348FFC4C \
-  && gpg --batch --verify nomad_${NOMAD_VERSION}_SHA256SUMS.sig nomad_${NOMAD_VERSION}_SHA256SUMS \
-  && grep nomad_${NOMAD_VERSION}_linux_amd64.zip nomad_${NOMAD_VERSION}_SHA256SUMS | sha256sum -c \
-  && unzip -d /bin nomad_${NOMAD_VERSION}_linux_amd64.zip \
-  && chmod +x /bin/nomad \
-  && rm -rf "$GNUPGHOME" nomad_${NOMAD_VERSION}_linux_amd64.zip nomad_${NOMAD_VERSION}_SHA256SUMS nomad_${NOMAD_VERSION}_SHA256SUMS.sig \
-  && apk del .nomad-deps
+ARG DEBIAN_FRONTEND=noninteractive
 
-RUN mkdir -p /nomad/data && \
-    mkdir -p /etc/nomad && \
-    chown -R nomad:nomad /nomad /etc/nomad
+ADD https://apt.releases.hashicorp.com/gpg hashicorp.gpg
+
+# ca-certificates and tzdata will appear as "already installed", but it's only
+# because of software-properties-common.
+
+# hadolint ignore=DL3008
+RUN apt-get update -qy \
+ && apt-get install -qy --no-install-recommends \
+        gnupg \
+        software-properties-common \
+ && apt-key add hashicorp.gpg \
+ && apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+ && apt-get update -qy \
+ && apt-get install -qy --no-install-recommends \
+        ca-certificates \
+        dumb-init=${DUMB_INIT_VERSION} \
+        gosu=${GOSU_VERSION} \
+        nomad=${NOMAD_VERSION} \
+        tzdata \
+ && apt-get remove -qy --purge \
+        gnupg \
+        software-properties-common \
+ && apt-get autoremove -qy \
+ && rm -rf \
+        hashicorp.gpg \
+        /var/lib/apt/lists/*
+
+# Expose the data directory as a volume since there's potentially long-running
+# state in there
+VOLUME /opt/nomad/data
 
 EXPOSE 4646 4647 4648 4648/udp
 
 COPY start.sh /usr/local/bin/
-
 ENTRYPOINT ["/usr/local/bin/start.sh"]
+
+CMD ["agent", "-dev"]
